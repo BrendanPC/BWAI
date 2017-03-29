@@ -4,6 +4,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Queue;
 
@@ -44,25 +45,29 @@ public class AlzaBot1 extends DefaultBWListener {
 
 	private ArrayList<BuildStep> buildOrder;
 
+	private LinkedList<Army> armies;
 	private Army stagingArmy;
 
 	private RegionGraph regions;
 
 	private enum ConditionType {
-		SUPPLY, BUILDING
+		SUPPLY, BUILDING, TECH
 	}
 
 	private Queue<BuildingPlan> buildingQueue;
 	private List<BuildingPlan> activeBuildPlans;
 	private Queue<UnitType> unitQueue;
+	private Queue<ResearchType> researchQueue;
 
-	private static final int FRAMES_PER_CHUNK = 500;
+	public static final int FRAMES_PER_CHUNK = 500;
 
+	//TODO this is becoming unwieldy, needs rework
 	private class BuildStep {
-		private final ConditionType type;
+		private final ConditionType conditionType;
 		private final int conditionCount;
 		private final UnitType conditionUnitType;
 		private final UnitType effectUnitType;
+		private final ResearchType effectUpgradeType;
 		private final int effectUnitCount;
 		private final boolean continueDroning;
 		private int startFrame = -1;
@@ -70,19 +75,41 @@ public class AlzaBot1 extends DefaultBWListener {
 		private int endConditionCount;
 
 		BuildStep(ConditionType t, int c, UnitType u, int i, boolean b) {
-			this.type = t;
+			this.conditionType = t;
 			this.conditionCount = c;
 			this.effectUnitType = u;
 			this.effectUnitCount = i;
 			this.continueDroning = b;
 			this.conditionUnitType = null;
+			this.effectUpgradeType = null;
 		}
 
 		BuildStep(ConditionType t, int c, UnitType conditionKind, UnitType effectType, int i, boolean b) {
-			this.type = t;
+			this.conditionType = t;
 			this.conditionCount = c;
 			this.effectUnitType = effectType;
 			this.effectUnitCount = i;
+			this.continueDroning = b;
+			this.conditionUnitType = conditionKind;
+			this.effectUpgradeType = null;
+		}
+
+		public BuildStep(ConditionType t, int c, UnitType conditionKind, UpgradeType upgrade, boolean b) {
+			this.conditionType = t;
+			this.conditionCount = c;
+			this.effectUnitType = null;
+			this.effectUpgradeType = new ResearchType(upgrade);
+			this.effectUnitCount = -1;
+			this.continueDroning = b;
+			this.conditionUnitType = conditionKind;
+		}
+
+		public BuildStep(ConditionType t, int c, UnitType conditionKind, TechType upgrade, boolean b) {
+			this.conditionType = t;
+			this.conditionCount = c;
+			this.effectUnitType = null;
+			this.effectUpgradeType = new ResearchType(upgrade);
+			this.effectUnitCount = -1;
 			this.continueDroning = b;
 			this.conditionUnitType = conditionKind;
 		}
@@ -98,7 +125,7 @@ public class AlzaBot1 extends DefaultBWListener {
 		}
 
 		public boolean isConditionMet() {
-			switch (this.type) {
+			switch (this.conditionType) {
 			case SUPPLY:
 				return (self.supplyUsed() >= this.conditionCount * 2);
 			case BUILDING:
@@ -116,14 +143,20 @@ public class AlzaBot1 extends DefaultBWListener {
 
 		public boolean followStep() {
 			isTimeToDrone = this.continueDroning;
-			if (this.effectUnitType.isBuilding()) {
-				queueBuilding(this.effectUnitType, self.getStartLocation());
-				this.endConditionType = this.effectUnitType;
-				this.endConditionCount = getUnitCount(this.endConditionType, null) + 1;
+			if (this.effectUnitType != null) {
+				if (this.effectUnitType.isBuilding()) {
+					queueBuilding(this.effectUnitType, self.getStartLocation());
+					this.endConditionType = this.effectUnitType;
+					this.endConditionCount = getUnitCount(this.endConditionType, null) + 1;
+				} else {
+					queueUnit(this.effectUnitType, this.effectUnitCount);
+					this.endConditionType = this.effectUnitType;
+					this.endConditionCount = getUnitCount(this.endConditionType, null) + this.effectUnitCount;
+				}
 			} else {
-				queueUnit(this.effectUnitType, this.effectUnitCount);
-				this.endConditionType = this.effectUnitType;
-				this.endConditionCount = getUnitCount(this.endConditionType, null) + this.effectUnitCount;
+				if (this.effectUpgradeType != null) {
+					queueResearch(this.effectUpgradeType);
+				}
 			}
 
 			return false;
@@ -152,21 +185,22 @@ public class AlzaBot1 extends DefaultBWListener {
 
 	private class BuildingPlan {
 		public BuildingPlan(UnitType unitType, TilePosition buildTile) {
-			this.b = unitType;
-			this.p = buildTile;
+			this.building = unitType;
+			this.buildingTile = buildTile;
 		}
 
-		public UnitType b;
-		public TilePosition p;
+		public UnitType building;
+		public TilePosition buildingTile;
 		public Unit builder;
+		public Unit vespeneGeyser; // special case
 		public int startFrame;
 
 		public boolean execute() {
-			if (game.getFrameCount() - startFrame > 1000) {
-				activeBuildPlans.remove(this);
+			if (game.getFrameCount() - startFrame > 1000) { 
+				activeBuildPlans.remove(this); // if something has gone wrong making a building, restart the process
 				buildingQueue.add(this);
 			}
-			return this.builder.build(this.b, this.p);
+			return this.builder.build(this.building, this.buildingTile);
 		}
 	}
 
@@ -187,12 +221,14 @@ public class AlzaBot1 extends DefaultBWListener {
 		buildOrder.add(new BuildStep(ConditionType.BUILDING, 1, UnitType.Zerg_Spawning_Pool, UnitType.Zerg_Zergling, 3, true));
 		buildOrder.add(new BuildStep(ConditionType.SUPPLY, 9, UnitType.Zerg_Extractor, 1, true));
 		buildOrder.add(new BuildStep(ConditionType.SUPPLY, 14, UnitType.Zerg_Hydralisk_Den, 1, true));
-		buildOrder.add(new BuildStep(ConditionType.SUPPLY, 20, UnitType.Zerg_Hydralisk, 100, true));
+		buildOrder.add(new BuildStep(ConditionType.BUILDING, 1, UnitType.Zerg_Hydralisk_Den, UnitType.Zerg_Hydralisk, 6, true));
+		buildOrder.add(new BuildStep(ConditionType.BUILDING, 1, UnitType.Zerg_Hydralisk_Den, UpgradeType.Muscular_Augments, true));
 
 		shapes = new ArrayList<DrawInfo>();
 
 		// econ / macro
 		buildingQueue = new ArrayDeque<BuildingPlan>();
+		researchQueue = new ArrayDeque<ResearchType>();
 		activeBuildPlans = new ArrayList<BuildingPlan>();
 		unitQueue = new ArrayDeque<UnitType>();
 		isTimeToDrone = true;
@@ -210,9 +246,10 @@ public class AlzaBot1 extends DefaultBWListener {
 		knownEnemyUnits = new HashMap<Integer, Unit>(100);
 		knownEnemyBuildings = new HashMap<Integer, Unit>(100);
 		stagingArmy = null;
+		armies = new LinkedList<Army>();
 		CombatManager.init(game);
 
-		game.setLocalSpeed(1);
+		game.setLocalSpeed(0);
 
 		// Use BWTA to analyze map
 		// This may take a few minutes if the map is processed first time!
@@ -267,7 +304,8 @@ public class AlzaBot1 extends DefaultBWListener {
 	}
 
 	public void onUnitComplete(Unit unit) {
-		if(unit.getPlayer() != self) return;
+		if (unit.getPlayer() != self)
+			return;
 		if (unit.getType() == UnitType.Zerg_Extractor) {
 			int workersOnGas = 0;
 			for (Unit u : game.getUnitsInRadius(unit.getPosition(), 300)) {
@@ -280,9 +318,9 @@ public class AlzaBot1 extends DefaultBWListener {
 		}
 		if (unit.getType() == UnitType.Zerg_Overlord)
 			morphingOverlords--;
-		
-		if(unit.getType() == UnitType.Zerg_Hatchery) {
-			if(stagingArmy != null) {
+
+		if (unit.getType() == UnitType.Zerg_Hatchery) {
+			if (stagingArmy != null) {
 				stagingArmy.moveTo(regions.getNewestRegionWithStatus(RegionStatus.ALLIED).getCenter());
 			}
 		}
@@ -291,26 +329,31 @@ public class AlzaBot1 extends DefaultBWListener {
 			if (stagingArmy == null) {
 				stagingArmy = new Army(unit, regions.getNewestRegionWithStatus(RegionStatus.ALLIED).getCenter(), game);
 			} else {
-				if (stagingArmy.addUnit(unit) > 10)
+				if (stagingArmy.addUnit(unit) > 10) {
 					stagingArmy.navigateTo(stagingArmy.getArmyAverage(), regions.getNewestRegionWithStatus(RegionStatus.ENEMY).getCenter());
-					//stagingArmy.moveTo(enemyStartingLocation.get(0).toPosition());
+					armies.add(stagingArmy);
+					stagingArmy = null;
+				}
 			}
 		}
 	}
 
 	@Override
 	public void onUnitMorph(Unit unit) {
-		if (unit.getPlayer() != self)
+		System.out.println("FUCK " + unit.getType());
+		if (unit.getPlayer() != self) {
 			return;
+		}
 		if (unit.getType().isBuilding()) {
 			regions.recordUnitDiscovery(unit);
-			for (int i = 0; i < activeBuildPlans.size(); i++) {
-				if (activeBuildPlans.get(i).builder.getID() == unit.getID()) {
-					activeBuildPlans.remove(i);
+			for (BuildingPlan plan : activeBuildPlans) {
+				if (plan.builder.getID() == unit.getID() || (plan.vespeneGeyser != null && plan.vespeneGeyser.getID() == unit.getID())) {
+					activeBuildPlans.remove(plan);
 					reservedMinerals -= unit.getType().mineralPrice();
 					reservedGas -= unit.getType().gasPrice();
-					break; // modifying array is fine since we break out after
+					break;
 				}
+				
 			}
 
 		}
@@ -331,19 +374,26 @@ public class AlzaBot1 extends DefaultBWListener {
 			if (currentStep.getStartFrame() == -1) {
 				currentStep.setStartFrame(currentFrame);
 				currentStep.followStep();
+				if (buildOrder.size() > currentStepNumber + 1)
+					currentStepNumber++;
 			}
 		}
-		if (buildOrder.size() > currentStepNumber + 1 && currentStep.isCompleted())
-			currentStepNumber++;
+		// if (buildOrder.size() > currentStepNumber + 1 && currentStep.isCompleted())
+		// currentStepNumber++;
 
-		if(stagingArmy != null) {
-			game.drawCircleMap(stagingArmy.followPath(), 3, Color.Cyan, true);
-			stagingArmy.removeDeadMembers();
-			Position p = stagingArmy.getArmyCentre();
-			game.drawCircleMap(p, 3, Color.Red, true);
-			p = stagingArmy.getArmyAverage();
-			game.drawCircleMap(p, 3, Color.Green, true);
+		regions.updateRegionStatuses();
+		for (Army army : armies) {
+			if(army.removeDeadMembers() == 0) {
+				armies.remove(army);
+			}
+			game.drawCircleMap(army.followPath(), 3, Color.Cyan, true);
+			game.drawCircleMap(army.getArmyAverage(), 3, Color.Green, true);
 		}
+
+		/*
+		 * if (stagingArmy != null) { game.drawCircleMap(stagingArmy.followPath(), 3, Color.Cyan, true); stagingArmy.removeDeadMembers(); Position p = stagingArmy.getArmyCentre(); game.drawCircleMap(p, 3, Color.Red, true); p =
+		 * stagingArmy.getArmyAverage(); game.drawCircleMap(p, 3, Color.Green, true); }
+		 */
 		game.drawTextScreen(10, 25, "Reserved Minerals: " + reservedMinerals + "\nReserved Gas: " + reservedGas + "\nCurrent Mineral Income: " + currentMineralIncome + "\nCurrent Gas Income: " + currentGasIncome + "\nCurrent Build Step: "
 				+ currentStepNumber + "\nNext Unit: " + unitQueue.peek());
 
@@ -370,7 +420,6 @@ public class AlzaBot1 extends DefaultBWListener {
 		// iterate through my units
 		for (Unit myUnit : self.getUnits()) {
 			if (myUnit.getType().producesLarva() && self.minerals() - reservedMinerals >= 100 && (self.supplyTotal() + morphingOverlords * 16 - self.supplyUsed() < 2)) {
-				game.drawTextMap(myUnit.getPosition(), "HERE");
 				myUnit.train(UnitType.Zerg_Overlord);
 			}
 
@@ -385,14 +434,23 @@ public class AlzaBot1 extends DefaultBWListener {
 			if (myUnit.getType() == UnitType.Zerg_Drone && myUnit.isInterruptible() && (myUnit.isIdle() || myUnit.isGatheringMinerals() && !myUnit.isCarryingMinerals())) {
 				if (buildingQueue.size() > 0) {
 					BuildingPlan plan = buildingQueue.peek();
-					double travelFrames = BWTA.getGroundDistance(myUnit.getTilePosition(), plan.p) / UnitType.Zerg_Drone.topSpeed();
+					double travelFrames = BWTA.getGroundDistance(myUnit.getTilePosition(), plan.buildingTile) / UnitType.Zerg_Drone.topSpeed();
 					double expectedMinerals = self.minerals() + travelFrames * currentMineralIncome / FRAMES_PER_CHUNK;
-					if (expectedMinerals >= plan.b.mineralPrice() && self.gas() >= plan.b.gasPrice()) {
-						myUnit.move(plan.p.toPosition());
+					if (expectedMinerals >= plan.building.mineralPrice() && self.gas() >= plan.building.gasPrice()) {
+						myUnit.move(plan.buildingTile.toPosition());
 						plan.builder = myUnit;
 						plan.startFrame = currentFrame;
 						activeBuildPlans.add(buildingQueue.poll());
 					}
+				}
+			}
+
+			ResearchType nextResearch = researchQueue.peek();
+			if (nextResearch != null && myUnit.getType() == nextResearch.whatResearches()) {
+				if (ResearchType.researchAtUnit(myUnit, nextResearch)) {
+					reservedMinerals -= nextResearch.mineralCost();
+					reservedGas -= nextResearch.gasCost();
+					researchQueue.poll();
 				}
 			}
 
@@ -428,14 +486,14 @@ public class AlzaBot1 extends DefaultBWListener {
 					}
 				}
 			}
-			
+
 			if (myUnit.getType() == UnitType.Zerg_Hydralisk) {
 				CombatManager.microHydralisk(myUnit);
 			}
 		}
 
 		// macro!
-		if (self.minerals() - reservedMinerals > 400 && currentMineralIncome > 200) {
+		if (self.minerals() - reservedMinerals > 300 && currentMineralIncome > 200) {
 			queueBuilding(UnitType.Zerg_Hatchery, self.getStartLocation());
 		}
 
@@ -497,10 +555,24 @@ public class AlzaBot1 extends DefaultBWListener {
 
 	private void queueBuilding(UnitType unitType, TilePosition tilePosition) {
 		TilePosition buildTile = getBuildTile(unitType, tilePosition);
+		if(buildTile == null) {
+			System.err.println("no build tile found");
+			return;
+		}
 		reservedMinerals += unitType.mineralPrice();
 		reservedGas += unitType.gasPrice();
-		buildingQueue.add(new BuildingPlan(unitType, buildTile));
+		BuildingPlan buildingPlan = new BuildingPlan(unitType, buildTile);
+		if(unitType == UnitType.Zerg_Extractor) {
+			buildingPlan.vespeneGeyser = game.getUnitsOnTile(buildTile).get(0);
+		}
+		buildingQueue.add(buildingPlan);
 		shapes.add(new DrawInfo(buildTile.toPosition(), new TilePosition(buildTile.getX() + unitType.tileWidth(), buildTile.getY() + unitType.tileHeight()).toPosition(), Color.White, false));
+	}
+
+	private void queueResearch(ResearchType upgrade) {
+		reservedMinerals += upgrade.mineralCost();
+		reservedGas += upgrade.gasCost();
+		researchQueue.add(upgrade);
 	}
 
 	private TilePosition getBuildTile(UnitType unitType, TilePosition tilePosition) {
@@ -544,7 +616,6 @@ public class AlzaBot1 extends DefaultBWListener {
 				currentDistance = newDistance;
 			}
 		}
-		shapes.add(new DrawInfo(nextExpo.toPosition(), Double.toString(currentDistance)));
 		return nextExpo;
 	}
 

@@ -117,6 +117,6 @@ public class CombatManager {
 	}
 
 	public static boolean isMelee(UnitType type) {
-		return !type.isWorker() && type.groundWeapon().maxRange() <= 32;
+		return type.groundWeapon().maxRange() <= 32;
 	}
 }

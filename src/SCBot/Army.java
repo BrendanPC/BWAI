@@ -47,8 +47,8 @@ public class Army {
 
 	public Position followPath() {
 		if (currentPath == null || currentPath.size() < 2)
-			return new Position(0,0);
-		if (currentPath.peek().getApproxDistance(this.getArmyAverage()) < 64) {
+			return new Position(0,0); // just to avoid NPE on circle draw
+		if (currentPath.peek().getApproxDistance(this.getArmyAverage()) < 128) {
 			currentPath.pop();
 		}
 		this.moveTo(currentPath.peek());
@@ -80,11 +80,15 @@ public class Army {
 		return members.size();
 	}
 
-	public void removeDeadMembers() {
+	public int removeDeadMembers() {
+		int count = 0;
 		for (Unit u : members) {
 			if (!u.exists())
 				members.remove(u);
+			else
+				count++;
 		}
+		return count;
 	}
 
 	public Position getArmyCentre() {
@@ -117,6 +121,9 @@ public class Army {
 		for (Unit u : members) {
 			averageX += u.getX();
 			averageY += u.getY();
+		}
+		if(members.size() == 0) {
+			return new Position(0,0);
 		}
 
 		return new Position(averageX / members.size(), averageY / members.size());
