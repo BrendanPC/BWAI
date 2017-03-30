@@ -29,16 +29,7 @@ public class AlzaBot1 extends DefaultBWListener {
 	private List<TilePosition> enemyStartingLocation;
 	private List<DrawInfo> shapes = new ArrayList<DrawInfo>();
 
-	private int reservedMinerals;
-	private int reservedGas;
-
-	private int currentMineralIncome;
-	private int currentGasIncome;
-
-	private int lastMineralsGathered;
-	private int lastGasGathered;
-
-	private int morphingOverlords;
+	private EconomyDirector economy;
 
 	private HashMap<Integer, Unit> knownEnemyUnits;
 	private HashMap<Integer, Unit> knownEnemyBuildings;
@@ -61,7 +52,7 @@ public class AlzaBot1 extends DefaultBWListener {
 
 	public static final int FRAMES_PER_CHUNK = 500;
 
-	//TODO this is becoming unwieldy, needs rework
+	// TODO this is becoming unwieldy, needs rework
 	private class BuildStep {
 		private final ConditionType conditionType;
 		private final int conditionCount;
@@ -196,7 +187,7 @@ public class AlzaBot1 extends DefaultBWListener {
 		public int startFrame;
 
 		public boolean execute() {
-			if (game.getFrameCount() - startFrame > 1000) { 
+			if (game.getFrameCount() - startFrame > 1000) {
 				activeBuildPlans.remove(this); // if something has gone wrong making a building, restart the process
 				buildingQueue.add(this);
 			}
@@ -227,26 +218,20 @@ public class AlzaBot1 extends DefaultBWListener {
 		shapes = new ArrayList<DrawInfo>();
 
 		// econ / macro
+		economy = new EconomyDirector(game);
 		buildingQueue = new ArrayDeque<BuildingPlan>();
 		researchQueue = new ArrayDeque<ResearchType>();
 		activeBuildPlans = new ArrayList<BuildingPlan>();
 		unitQueue = new ArrayDeque<UnitType>();
 		isTimeToDrone = true;
-		antiAirSpotted = false;
 		currentStepNumber = 0;
-		reservedMinerals = 0;
-		reservedGas = 0;
-		currentMineralIncome = 0;
-		currentGasIncome = 0;
-		lastMineralsGathered = 0;
-		lastGasGathered = 0;
-		morphingOverlords = 1; // starting Overlord will immediately "complete" and decrement
 
 		// scouting / army
 		knownEnemyUnits = new HashMap<Integer, Unit>(100);
 		knownEnemyBuildings = new HashMap<Integer, Unit>(100);
 		stagingArmy = null;
 		armies = new LinkedList<Army>();
+		antiAirSpotted = false;
 		CombatManager.init(game);
 
 		game.setLocalSpeed(0);
@@ -299,7 +284,7 @@ public class AlzaBot1 extends DefaultBWListener {
 			if (unit.getType().isBuilding())
 				queueBuilding(unit.getType(), unit.getTilePosition());
 			if (unit.getBuildType() == UnitType.Zerg_Overlord)
-				morphingOverlords--;
+				economy.morphingOverlordsChange(-1);
 		}
 	}
 
@@ -317,7 +302,7 @@ public class AlzaBot1 extends DefaultBWListener {
 			}
 		}
 		if (unit.getType() == UnitType.Zerg_Overlord)
-			morphingOverlords--;
+			economy.morphingOverlordsChange(-1);
 
 		if (unit.getType() == UnitType.Zerg_Hatchery) {
 			if (stagingArmy != null) {
@@ -349,24 +334,25 @@ public class AlzaBot1 extends DefaultBWListener {
 			for (BuildingPlan plan : activeBuildPlans) {
 				if (plan.builder.getID() == unit.getID() || (plan.vespeneGeyser != null && plan.vespeneGeyser.getID() == unit.getID())) {
 					activeBuildPlans.remove(plan);
-					reservedMinerals -= unit.getType().mineralPrice();
-					reservedGas -= unit.getType().gasPrice();
+					economy.unreserveResources(unit.getType());
 					break;
 				}
-				
+
 			}
 
 		}
-		if (unit.getBuildType() == unitQueue.peek())
+		if (unit.getBuildType() == unitQueue.peek()) {
 			unitQueue.poll();
-		if (unit.getBuildType() == UnitType.Zerg_Overlord)
-			morphingOverlords++;
+		}
+		if (unit.getBuildType() == UnitType.Zerg_Overlord) {
+			economy.morphingOverlordsChange(1);
+		}
 	}
 
 	@Override
 	public void onFrame() {
 		int currentFrame = game.getFrameCount();
-		updateMineralGasIncomes(currentFrame);
+		economy.updateIncome();
 		game.drawTextScreen(10, 10, "Playing as " + self.getName() + " - " + self.getRace());
 
 		BuildStep currentStep = buildOrder.get(currentStepNumber);
@@ -383,7 +369,7 @@ public class AlzaBot1 extends DefaultBWListener {
 
 		regions.updateRegionStatuses();
 		for (Army army : armies) {
-			if(army.removeDeadMembers() == 0) {
+			if (army.removeDeadMembers() == 0) {
 				armies.remove(army);
 			}
 			game.drawCircleMap(army.followPath(), 3, Color.Cyan, true);
@@ -394,7 +380,7 @@ public class AlzaBot1 extends DefaultBWListener {
 		 * if (stagingArmy != null) { game.drawCircleMap(stagingArmy.followPath(), 3, Color.Cyan, true); stagingArmy.removeDeadMembers(); Position p = stagingArmy.getArmyCentre(); game.drawCircleMap(p, 3, Color.Red, true); p =
 		 * stagingArmy.getArmyAverage(); game.drawCircleMap(p, 3, Color.Green, true); }
 		 */
-		game.drawTextScreen(10, 25, "Reserved Minerals: " + reservedMinerals + "\nReserved Gas: " + reservedGas + "\nCurrent Mineral Income: " + currentMineralIncome + "\nCurrent Gas Income: " + currentGasIncome + "\nCurrent Build Step: "
+		game.drawTextScreen(10, 25, "Reserved Minerals: " + economy.getReservedMinerals() + "\nReserved Gas: " + economy.getReservedGas() + "\nCurrent Mineral Income: " + economy.getMineralIncome() + "\nCurrent Gas Income: " + economy.getGasIncome() + "\nCurrent Build Step: "
 				+ currentStepNumber + "\nNext Unit: " + unitQueue.peek());
 
 		for (BuildingPlan plan : activeBuildPlans) {
@@ -419,12 +405,12 @@ public class AlzaBot1 extends DefaultBWListener {
 
 		// iterate through my units
 		for (Unit myUnit : self.getUnits()) {
-			if (myUnit.getType().producesLarva() && self.minerals() - reservedMinerals >= 100 && (self.supplyTotal() + morphingOverlords * 16 - self.supplyUsed() < 2)) {
+			if (myUnit.getType().producesLarva() && economy.mustSpawnMoreOverlords()) {
 				myUnit.train(UnitType.Zerg_Overlord);
 			}
 
 			// if there's enough minerals, train an SCV
-			if (myUnit.getType().producesLarva() && self.minerals() - reservedMinerals >= 50) {
+			if (myUnit.getType().producesLarva() && self.minerals() - economy.getReservedMinerals() >= 50) {
 				if (!unitQueue.isEmpty())
 					myUnit.train(unitQueue.peek());
 				if (isTimeToDrone)
@@ -435,7 +421,8 @@ public class AlzaBot1 extends DefaultBWListener {
 				if (buildingQueue.size() > 0) {
 					BuildingPlan plan = buildingQueue.peek();
 					double travelFrames = BWTA.getGroundDistance(myUnit.getTilePosition(), plan.buildingTile) / UnitType.Zerg_Drone.topSpeed();
-					double expectedMinerals = self.minerals() + travelFrames * currentMineralIncome / FRAMES_PER_CHUNK;
+					double expectedMinerals = self.minerals() + travelFrames * economy.getMineralIncome() / FRAMES_PER_CHUNK;
+					//TODO expectedGas
 					if (expectedMinerals >= plan.building.mineralPrice() && self.gas() >= plan.building.gasPrice()) {
 						myUnit.move(plan.buildingTile.toPosition());
 						plan.builder = myUnit;
@@ -448,8 +435,7 @@ public class AlzaBot1 extends DefaultBWListener {
 			ResearchType nextResearch = researchQueue.peek();
 			if (nextResearch != null && myUnit.getType() == nextResearch.whatResearches()) {
 				if (ResearchType.researchAtUnit(myUnit, nextResearch)) {
-					reservedMinerals -= nextResearch.mineralCost();
-					reservedGas -= nextResearch.gasCost();
+					economy.unreserveResources(nextResearch.mineralCost(), nextResearch.gasCost());
 					researchQueue.poll();
 				}
 			}
@@ -476,7 +462,6 @@ public class AlzaBot1 extends DefaultBWListener {
 			if (myUnit.getType().isWorker()) {
 
 				CombatManager.manageWorkerCombat(myUnit);
-				// end Worker Combat
 
 				if (myUnit.isIdle()) {
 					Unit closestMineral = getClosestMineralPatch(myUnit);
@@ -493,7 +478,7 @@ public class AlzaBot1 extends DefaultBWListener {
 		}
 
 		// macro!
-		if (self.minerals() - reservedMinerals > 300 && currentMineralIncome > 200) {
+		if (self.minerals() - economy.getReservedMinerals() > 300 && economy.getMineralIncome() > 200) {
 			queueBuilding(UnitType.Zerg_Hatchery, self.getStartLocation());
 		}
 
@@ -533,15 +518,7 @@ public class AlzaBot1 extends DefaultBWListener {
 		return new Position((position2.getX() - x) * distance / magnitude + x, (position2.getY() - y) * distance / magnitude + y);
 	}
 
-	private void updateMineralGasIncomes(int currentFrame) {
-		if (currentFrame % FRAMES_PER_CHUNK == 0) {
-			currentMineralIncome = self.gatheredMinerals() - lastMineralsGathered;
-			lastMineralsGathered = self.gatheredMinerals();
-
-			currentGasIncome = self.gatheredGas() - lastGasGathered;
-			lastGasGathered = self.gatheredGas();
-		}
-	}
+	
 
 	private int getUnitCount(UnitType type, UnitType type2) {
 		int count = 0;
@@ -555,14 +532,13 @@ public class AlzaBot1 extends DefaultBWListener {
 
 	private void queueBuilding(UnitType unitType, TilePosition tilePosition) {
 		TilePosition buildTile = getBuildTile(unitType, tilePosition);
-		if(buildTile == null) {
+		if (buildTile == null) {
 			System.err.println("no build tile found");
 			return;
 		}
-		reservedMinerals += unitType.mineralPrice();
-		reservedGas += unitType.gasPrice();
+		economy.reserveResources(unitType);
 		BuildingPlan buildingPlan = new BuildingPlan(unitType, buildTile);
-		if(unitType == UnitType.Zerg_Extractor) {
+		if (unitType == UnitType.Zerg_Extractor) {
 			buildingPlan.vespeneGeyser = game.getUnitsOnTile(buildTile).get(0);
 		}
 		buildingQueue.add(buildingPlan);
@@ -570,8 +546,7 @@ public class AlzaBot1 extends DefaultBWListener {
 	}
 
 	private void queueResearch(ResearchType upgrade) {
-		reservedMinerals += upgrade.mineralCost();
-		reservedGas += upgrade.gasCost();
+		economy.reserveResources(upgrade.mineralCost(), upgrade.gasCost());
 		researchQueue.add(upgrade);
 	}
 
