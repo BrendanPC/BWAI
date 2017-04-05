@@ -26,6 +26,7 @@ public class ResearchType {
 			return techType.whatResearches();
 		}
 	}
+	
 
 	public static boolean researchAtUnit(Unit unit, ResearchType rt) {
 		if (rt.upgradeType != null) {
