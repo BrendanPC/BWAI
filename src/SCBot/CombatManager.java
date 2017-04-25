@@ -67,14 +67,12 @@ public class CombatManager {
 			int defenderCount = 0;
 			for (Unit defender : defenders) {
 				if (defender.getHitPoints() <= (attackers > 2 ? 19 : 10)) {
-					System.out.println("Retreating! " + defender.getID());
 					if (escapeMineral != null) {
 						defender.gather(escapeMineral);
 					} else {
 						// TODO run away!
 					}
 				} else {
-					System.out.println("Launching attack! " + defender.getID());
 					if (attacker != null)
 						if (defenderCount < attackers * 3) {
 							defender.attack(attacker);

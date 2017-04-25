@@ -110,11 +110,10 @@ public class RegionGraph {
 				r = n.region;
 			}
 		}
-		if(r != null) {
+		if (r != null) {
 			return r;
-		}
-		else {
-			switch(status) {
+		} else {
+			switch (status) {
 			case ENEMY:
 			case ALLIED:
 				return getNewestRegionWithStatus(RegionStatus.THREATENED);
@@ -127,7 +126,7 @@ public class RegionGraph {
 			}
 		}
 	}
-	
+
 	// the above null-safe approach is not desirable here: because of what this is used for, we'd rather get null than a substitute return
 	public Region getOldestRegionWithStatus(RegionStatus status) {
 		int age = this.game.getFrameCount();
@@ -142,7 +141,7 @@ public class RegionGraph {
 	}
 
 	public void updateRegionStatuses() {
-		if (this.game.getFrameCount() % AlzaBot1.FRAMES_PER_CHUNK != 0) {
+		if (this.game.getFrameCount() % AlzaBot1.FRAME_INTERVAL_ONE != 0) {
 			return;
 		}
 		for (Node node : this.nodes.values()) {

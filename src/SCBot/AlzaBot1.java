@@ -50,7 +50,9 @@ public class AlzaBot1 extends DefaultBWListener {
 	private Queue<UnitType> unitQueue;
 	private Queue<ResearchType> researchQueue;
 
-	public static final int FRAMES_PER_CHUNK = 500;
+	// for periodic tasks that should not be done simultaneously
+	public static final int FRAME_INTERVAL_ONE = 499;
+	public static final int FRAME_INTERVAL_TWO = 503;
 
 	// TODO this is becoming unwieldy, needs rework
 	private class BuildStep {
@@ -174,7 +176,7 @@ public class AlzaBot1 extends DefaultBWListener {
 		public boolean opaque = false;
 	}
 
-	private class BuildingPlan {
+	public class BuildingPlan {
 		public BuildingPlan(UnitType unitType, TilePosition buildTile) {
 			this.building = unitType;
 			this.buildingTile = buildTile;
@@ -190,8 +192,13 @@ public class AlzaBot1 extends DefaultBWListener {
 			if (AlzaBot1.this.game.getFrameCount() - this.startFrame > 1000) {
 				AlzaBot1.this.activeBuildPlans.remove(this); // if something has gone wrong making a building, restart the process
 				AlzaBot1.this.buildingQueue.add(this);
+				System.out.println("building plan resetting: " + this.building);
 			}
 			return this.builder.build(this.building, this.buildingTile);
+		}
+		
+		public boolean equalTiles(TilePosition tile) {
+			return this.buildingTile.getX() == tile.getX() && this.buildingTile.getY() == tile.getY();
 		}
 	}
 
@@ -363,8 +370,6 @@ public class AlzaBot1 extends DefaultBWListener {
 					this.currentStepNumber++;
 			}
 		}
-		// if (buildOrder.size() > currentStepNumber + 1 && currentStep.isCompleted())
-		// currentStepNumber++;
 
 		this.regions.updateRegionStatuses();
 		for (Army army : this.armies) {
@@ -379,14 +384,26 @@ public class AlzaBot1 extends DefaultBWListener {
 		 * if (stagingArmy != null) { game.drawCircleMap(stagingArmy.followPath(), 3, Color.Cyan, true); stagingArmy.removeDeadMembers(); Position p = stagingArmy.getArmyCentre(); game.drawCircleMap(p, 3, Color.Red, true); p =
 		 * stagingArmy.getArmyAverage(); game.drawCircleMap(p, 3, Color.Green, true); }
 		 */
-		this.game.drawTextScreen(10, 25, "Reserved Minerals: " + this.economy.getReservedMinerals() + "\nReserved Gas: " + this.economy.getReservedGas() + "\nCurrent Mineral Income: " + this.economy.getMineralIncome() + "\nCurrent Gas Income: " + this.economy.getGasIncome() + "\nCurrent Build Step: "
-				+ this.currentStepNumber + "\nNext Unit: " + this.unitQueue.peek());
+		this.game.drawTextScreen(10, 25, "Reserved Minerals: " + this.economy.getReservedMinerals() + "\nReserved Gas: " + this.economy.getReservedGas() + "\nCurrent Mineral Income: " + this.economy.getMineralIncome()
+				+ "\nCurrent Gas Income: " + this.economy.getGasIncome() + "\nCurrent Build Step: " + this.currentStepNumber + "\nNext Unit: " + this.unitQueue.peek());
 
+		int hatcheryBuildPlanCount = 0;
 		for (BuildingPlan plan : this.activeBuildPlans) {
 			plan.execute();
+			if(plan.building == UnitType.Zerg_Hatchery) {
+				hatcheryBuildPlanCount++;
+			}
 		}
 
-		// scouting
+		if(hatcheryBuildPlanCount > 1) {
+			//System.out.println(hatcheryBuildPlanCount);
+		}
+		// macro!
+		if (this.economy.shouldExpand(hatcheryBuildPlanCount)) {
+			queueBuilding(UnitType.Zerg_Hatchery, this.self.getStartLocation());
+		}
+
+		// TODO move elsewhere
 		if (this.enemyStartingLocation.size() > 1) {
 			for (TilePosition possibleBase : this.enemyStartingLocation) {
 				if (this.game.isVisible(possibleBase)) {
@@ -410,18 +427,20 @@ public class AlzaBot1 extends DefaultBWListener {
 
 			// if there's enough minerals, train an SCV
 			if (myUnit.getType().producesLarva() && this.self.minerals() - this.economy.getReservedMinerals() >= 50) {
-				if (!this.unitQueue.isEmpty())
+				if (!this.unitQueue.isEmpty()) {
 					myUnit.train(this.unitQueue.peek());
-				if (this.isTimeToDrone)
+				}
+				if (this.isTimeToDrone) {
 					myUnit.train(UnitType.Zerg_Drone);
+				}
 			}
 
 			if (myUnit.getType() == UnitType.Zerg_Drone && myUnit.isInterruptible() && (myUnit.isIdle() || myUnit.isGatheringMinerals() && !myUnit.isCarryingMinerals())) {
 				if (this.buildingQueue.size() > 0) {
 					BuildingPlan plan = this.buildingQueue.peek();
 					double travelFrames = BWTA.getGroundDistance(myUnit.getTilePosition(), plan.buildingTile) / UnitType.Zerg_Drone.topSpeed();
-					double expectedMinerals = this.self.minerals() + travelFrames * this.economy.getMineralIncome() / FRAMES_PER_CHUNK;
-					//TODO expectedGas
+					double expectedMinerals = this.self.minerals() + travelFrames * this.economy.getMineralIncome() / FRAME_INTERVAL_ONE;
+					// TODO expectedGas
 					if (expectedMinerals >= plan.building.mineralPrice() && this.self.gas() >= plan.building.gasPrice()) {
 						myUnit.move(plan.buildingTile.toPosition());
 						plan.builder = myUnit;
@@ -459,26 +478,15 @@ public class AlzaBot1 extends DefaultBWListener {
 			}
 
 			if (myUnit.getType().isWorker()) {
-
 				CombatManager.manageWorkerCombat(myUnit);
-
 				if (myUnit.isIdle()) {
-					Unit closestMineral = getClosestMineralPatch(myUnit);
-					// if a mineral patch was found, send the worker to gather it
-					if (closestMineral != null) {
-						myUnit.gather(closestMineral, false);
-					}
+					this.economy.assignMineralPatch(myUnit);
 				}
 			}
 
 			if (myUnit.getType() == UnitType.Zerg_Hydralisk) {
 				CombatManager.microHydralisk(myUnit);
 			}
-		}
-
-		// macro!
-		if (this.self.minerals() - this.economy.getReservedMinerals() > 300 && this.economy.getMineralIncome() > 200) {
-			queueBuilding(UnitType.Zerg_Hatchery, this.self.getStartLocation());
 		}
 
 		for (DrawInfo di : this.shapes) {
@@ -490,34 +498,12 @@ public class AlzaBot1 extends DefaultBWListener {
 		this.regions.printNames();
 	}// onframe
 
-	private Unit getClosestMineralPatch(Unit worker) {
-		for (BaseLocation base : BWTA.getBaseLocations()) {
-			for (Unit hatchery : this.game.getUnitsOnTile(base.getTilePosition())) {
-				if (hatchery.getType().producesLarva() && hatchery.getPlayer() == this.self) {
-					// base is mine
-					int drones = 0;
-					for (Unit u : hatchery.getUnitsInRadius(320)) {
-						if (u.getType().isWorker())
-							drones++;
-					}
-					if (drones < (base.isMineralOnly() ? 10 : 12)) {
-						if (!base.getMinerals().isEmpty())
-							return base.getMinerals().get(0);
-					}
-				}
-			}
-		}
-		return null;
-	}
-
 	public static Position getOppositePoint(Position position1, Position position2, int distance) {
 		int magnitude = position1.getApproxDistance(position2);
 		int x = position1.getX();
 		int y = position1.getY();
 		return new Position((position2.getX() - x) * distance / magnitude + x, (position2.getY() - y) * distance / magnitude + y);
 	}
-
-	
 
 	private int getUnitCount(UnitType type, UnitType type2) {
 		int count = 0;
@@ -551,7 +537,7 @@ public class AlzaBot1 extends DefaultBWListener {
 
 	private TilePosition getBuildTile(UnitType unitType, TilePosition tilePosition) {
 		if (unitType.isResourceDepot()) {
-			return this.economy.getNextExpansion();
+			return this.economy.getNextExpansion(this.activeBuildPlans);
 		}
 		if (unitType == UnitType.Zerg_Extractor) {
 			return this.game.getBuildLocation(unitType, tilePosition);
