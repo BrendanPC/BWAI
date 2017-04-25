@@ -31,33 +31,33 @@ public class Army {
 	private Game game;
 
 	Army(Unit first, Position p, Game g) {
-		members = new ArrayList<Unit>();
-		members.add(first);
-		targetPosition = p;
-		game = g;
-		status = ArmyStatus.STAGING;
+		this.members = new ArrayList<Unit>();
+		this.members.add(first);
+		this.targetPosition = p;
+		this.game = g;
+		this.status = ArmyStatus.STAGING;
 		this.attackPosition(p);
 	}
 
 	private void attackPosition(Position p) {
-		for (Unit u : members) {
+		for (Unit u : this.members) {
 			u.attack(p);
 		}
 	}
 
 	public Position followPath() {
-		if (currentPath == null || currentPath.size() < 2)
+		if (this.currentPath == null || this.currentPath.size() < 2)
 			return new Position(0,0); // just to avoid NPE on circle draw
-		if (currentPath.peek().getApproxDistance(this.getArmyAverage()) < 128) {
-			currentPath.pop();
+		if (this.currentPath.peek().getApproxDistance(this.getArmyAverage()) < 128) {
+			this.currentPath.pop();
 		}
-		this.moveTo(currentPath.peek());
-		return currentPath.peek();
+		this.moveTo(this.currentPath.peek());
+		return this.currentPath.peek();
 	}
 
 	public void moveTo(Position p) {
-		targetPosition = p;
-		status = ArmyStatus.TRANSIT;
+		this.targetPosition = p;
+		this.status = ArmyStatus.TRANSIT;
 		this.attackPosition(p);
 	}
 
@@ -75,16 +75,16 @@ public class Army {
 	}
 
 	public int addUnit(Unit u) {
-		members.add(u);
-		u.attack(targetPosition);
-		return members.size();
+		this.members.add(u);
+		u.attack(this.targetPosition);
+		return this.members.size();
 	}
 
 	public int removeDeadMembers() {
 		int count = 0;
-		for (Unit u : members) {
+		for (Unit u : this.members) {
 			if (!u.exists())
-				members.remove(u);
+				this.members.remove(u);
 			else
 				count++;
 		}
@@ -92,10 +92,10 @@ public class Army {
 	}
 
 	public Position getArmyCentre() {
-		int[] xList = new int[members.size()];
-		int[] yList = new int[members.size()];
+		int[] xList = new int[this.members.size()];
+		int[] yList = new int[this.members.size()];
 		int i = 0;
-		for (Unit u : members) {
+		for (Unit u : this.members) {
 			xList[i] = u.getX();
 			yList[i] = u.getY();
 			i++;
@@ -105,12 +105,12 @@ public class Army {
 		int medianX;
 		int medianY;
 
-		if (members.size() % 2 == 0) {
-			medianX = (xList[members.size() / 2] + xList[members.size() / 2 + 1]) / 2;
-			medianY = (yList[members.size() / 2] + yList[members.size() / 2 + 1]) / 2;
+		if (this.members.size() % 2 == 0) {
+			medianX = (xList[this.members.size() / 2] + xList[this.members.size() / 2 + 1]) / 2;
+			medianY = (yList[this.members.size() / 2] + yList[this.members.size() / 2 + 1]) / 2;
 		} else {
-			medianX = xList[members.size() / 2];
-			medianY = xList[members.size() / 2];
+			medianX = xList[this.members.size() / 2];
+			medianY = xList[this.members.size() / 2];
 		}
 		return new Position(medianX, medianY);
 	}
@@ -118,14 +118,14 @@ public class Army {
 	public Position getArmyAverage() {
 		int averageX = 0;
 		int averageY = 0;
-		for (Unit u : members) {
+		for (Unit u : this.members) {
 			averageX += u.getX();
 			averageY += u.getY();
 		}
-		if(members.size() == 0) {
+		if(this.members.size() == 0) {
 			return new Position(0,0);
 		}
 
-		return new Position(averageX / members.size(), averageY / members.size());
+		return new Position(averageX / this.members.size(), averageY / this.members.size());
 	}
 }

@@ -1,5 +1,7 @@
 package SCBot;
 
+import java.util.List;
+
 import SCBot.RegionGraph.RegionStatus;
 import bwapi.Game;
 import bwapi.Player;
@@ -91,15 +93,28 @@ public class EconomyDirector {
 		return this.self.minerals() - this.reservedMinerals >= 100 && (this.self.supplyTotal() + this.morphingOverlords * 16 - this.self.supplyUsed() < 2) && this.self.supplyTotal() < 200;
 	}
 
-	public TilePosition getNextExpansion() {
+	public TilePosition getNextExpansion(List<AlzaBot1.BuildingPlan> currentPlans) {
 		TilePosition nextExpo = null;
 		Region enemyBase = this.regions.getOldestRegionWithStatus(RegionStatus.ENEMY);
-		double currentDistance = 0;
+		double currentValue = 0;
 		for (BaseLocation b : BWTA.getBaseLocations()) {
 			if (this.regions.getRegionStatus(b.getPosition()) != RegionStatus.NEUTRAL) {
 				//don't want to expand to enemy, threatened or allied region
 				continue;
 			}
+			boolean alreadyBuilding = false;
+			for(AlzaBot1.BuildingPlan plan : currentPlans) {
+				System.out.println(plan.buildingTile.toString() + b.getTilePosition() + (plan.buildingTile == b.getTilePosition()));
+				if(plan.equalTiles(b.getTilePosition())) {
+					alreadyBuilding = true;
+					break;
+				}
+			}
+			if(alreadyBuilding) {
+				System.out.println("trying to build same place");
+				continue;
+			}
+			
 			double newDistance = BWTA.getGroundDistance(b.getTilePosition(), this.self.getStartLocation());
 			if (newDistance < 0) {
 				continue; // island expo!!
@@ -107,9 +122,9 @@ public class EconomyDirector {
 			double enemyDistance = (enemyBase == null) ? 0 : BWTA.getGroundDistance(b.getTilePosition(), enemyBase.getCenter().toTilePosition());
 			double baseValue = newDistance - enemyDistance;
 			//System.out.println(baseValue + "to me:" + newDistance + " to them:" + enemyDistance);
-			if (nextExpo == null || baseValue < currentDistance) {
+			if (nextExpo == null || baseValue < currentValue) {
 				nextExpo = b.getTilePosition();
-				currentDistance = baseValue;
+				currentValue = baseValue;
 			}
 		}
 		return nextExpo;
@@ -144,13 +159,15 @@ public class EconomyDirector {
 		if(nearestBase != null) {
 			return worker.gather(nearestBase.getMinerals().get(0));
 		}
+		//TODO distance mining
 		System.err.println("No mineral patches available!");
 		return false;
 		
 	}
 
 	public boolean shouldExpand(int buildingHatcheries) {
-		return buildingHatcheries < 2 && this.currentMineralIncome > 200;
+		//TODO need to account for both BuildingQueue and ActiveBuildPlans
+		return false;
 	}
 
 }

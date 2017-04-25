@@ -20,10 +20,10 @@ public class ResearchType {
 	}
 
 	public UnitType whatResearches() {
-		if (upgradeType != null) {
-			return upgradeType.whatUpgrades();
+		if (this.upgradeType != null) {
+			return this.upgradeType.whatUpgrades();
 		} else {
-			return techType.whatResearches();
+			return this.techType.whatResearches();
 		}
 	}
 	
@@ -37,20 +37,20 @@ public class ResearchType {
 	}
 	
 	public int mineralCost() {
-		if(upgradeType != null) {
-			return upgradeType.mineralPrice();
+		if(this.upgradeType != null) {
+			return this.upgradeType.mineralPrice();
 		}
 		else {
-			return techType.mineralPrice();
+			return this.techType.mineralPrice();
 		}
 	}
 	
 	public int gasCost() {
-		if(upgradeType != null) {
-			return upgradeType.gasPrice();
+		if(this.upgradeType != null) {
+			return this.upgradeType.gasPrice();
 		}
 		else {
-			return techType.gasPrice();
+			return this.techType.gasPrice();
 		}
 	}
 }

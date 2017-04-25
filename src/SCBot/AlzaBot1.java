@@ -176,7 +176,7 @@ public class AlzaBot1 extends DefaultBWListener {
 		public boolean opaque = false;
 	}
 
-	private class BuildingPlan {
+	public class BuildingPlan {
 		public BuildingPlan(UnitType unitType, TilePosition buildTile) {
 			this.building = unitType;
 			this.buildingTile = buildTile;
@@ -195,6 +195,10 @@ public class AlzaBot1 extends DefaultBWListener {
 				System.out.println("building plan resetting: " + this.building);
 			}
 			return this.builder.build(this.building, this.buildingTile);
+		}
+		
+		public boolean equalTiles(TilePosition tile) {
+			return this.buildingTile.getX() == tile.getX() && this.buildingTile.getY() == tile.getY();
 		}
 	}
 
@@ -237,7 +241,6 @@ public class AlzaBot1 extends DefaultBWListener {
 		this.antiAirSpotted = false;
 		CombatManager.init(this.game);
 
-		System.out.println("JESUSWTF");
 		this.game.setLocalSpeed(0);
 
 		// Use BWTA to analyze map
@@ -392,6 +395,9 @@ public class AlzaBot1 extends DefaultBWListener {
 			}
 		}
 
+		if(hatcheryBuildPlanCount > 1) {
+			//System.out.println(hatcheryBuildPlanCount);
+		}
 		// macro!
 		if (this.economy.shouldExpand(hatcheryBuildPlanCount)) {
 			queueBuilding(UnitType.Zerg_Hatchery, this.self.getStartLocation());
@@ -531,7 +537,7 @@ public class AlzaBot1 extends DefaultBWListener {
 
 	private TilePosition getBuildTile(UnitType unitType, TilePosition tilePosition) {
 		if (unitType.isResourceDepot()) {
-			return this.economy.getNextExpansion();
+			return this.economy.getNextExpansion(this.activeBuildPlans);
 		}
 		if (unitType == UnitType.Zerg_Extractor) {
 			return this.game.getBuildLocation(unitType, tilePosition);
